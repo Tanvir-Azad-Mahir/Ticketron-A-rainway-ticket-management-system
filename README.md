@@ -103,26 +103,18 @@ Ticketron/
 ## ⚙️ Installation & Setup
 
 1. Clone the repository
-```bash
-
 git clone https://github.com/your-username/ticketron.git
 
 
 Move the project to XAMPP htdocs
-
 C:\xampp\htdocs\ticketron
 
-
 Start Apache and MySQL from XAMPP Control Panel
-
 Import the database
-
 Open phpMyAdmin
-
 Create a database named tickettron
 
-Import the provided .sql file
-
+Import the provided .sql file(ticketron.txt)
 Configure database connection in db.php
 
 $conn = mysqli_connect("localhost", "root", "", "tickettron");
