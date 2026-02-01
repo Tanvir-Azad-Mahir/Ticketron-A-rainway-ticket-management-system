@@ -1,0 +1,1512 @@
+===============================================================================
+                    TICKETRON - SQL QUERIES DOCUMENTATION
+                Railway Ticket Management System
+===============================================================================
+
+TABLE OF CONTENTS:
+1. USER AUTHENTICATION & MANAGEMENT
+2. BOOKING & TICKET OPERATIONS
+3. TRAIN & ROUTE MANAGEMENT
+4. SEAT & COACH OPERATIONS
+5. PAYMENT & REFUND OPERATIONS
+6. ADMIN OPERATIONS
+7. SEARCH & FILTER QUERIES
+8. STATISTICS & REPORTS
+
+===============================================================================
+1. USER AUTHENTICATION & MANAGEMENT
+===============================================================================
+
+-- User Registration (Check for duplicate NID)
+SELECT user_id FROM users WHERE nid = ? LIMIT 1;
+
+-- Get next user ID for registration
+SELECT MAX(user_id) as max_user_id FROM users;
+
+-- Insert new user
+INSERT INTO users (user_id, name, email, phone, nid, pass) 
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- User Login by Email
+SELECT user_id, name, email, phone, pass FROM users 
+WHERE email = ? LIMIT 1;
+
+-- User Login by Phone
+SELECT user_id, name, email, phone, pass FROM users 
+WHERE phone = ? LIMIT 1;
+
+-- User Login by Phone (with formatting handling)
+SELECT user_id, name, email, phone, pass FROM users 
+WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? 
+LIMIT 1;
+
+-- Get User Profile
+SELECT user_id, name, email, phone, nid, created_at FROM users 
+WHERE user_id = ? LIMIT 1;
+
+-- Auto-login from Remember Me Cookie
+SELECT user_id, name, email, phone FROM users 
+WHERE user_id = ? LIMIT 1;
+
+
+===============================================================================
+2. BOOKING & TICKET OPERATIONS
+===============================================================================
+
+-- Create New Booking
+INSERT INTO booking (user_id, booking_date, total_amount, status) 
+VALUES (?, ?, ?, 'Pending');
+
+-- Update Booking Status to Completed
+UPDATE booking SET status = 'Completed' WHERE booking_id = ?;
+
+-- Check if Seat is Already Booked
+SELECT ticket_id FROM ticket 
+WHERE schedule_id = ? AND seat_id = ? AND booking_status = 'Booked';
+
+-- Insert Ticket
+INSERT INTO ticket (booking_id, schedule_id, user_id, from_station_id, 
+                    to_station_id, seat_id, quantity, booking_status, 
+                    fare, booking_date) 
+VALUES (?, ?, ?, ?, ?, ?, ?, 'Booked', ?, ?);
+
+-- Insert Booking Detail
+INSERT INTO booking_detail (booking_id, seat_id, price, status) 
+VALUES (?, ?, ?, 'Booked');
+
+-- Get User's All Bookings
+SELECT b.booking_id, b.booking_date, b.total_amount, b.status, 
+       p.payment_status, p.payment_method
+FROM booking b
+LEFT JOIN payment p ON b.booking_id = p.booking_id
+WHERE b.user_id = ?
+ORDER BY b.booking_date DESC, b.booking_id DESC;
+
+-- Get User's Filtered Bookings (with travel date)
+SELECT DISTINCT b.booking_id, b.booking_date, b.total_amount, b.status, 
+                p.payment_status, p.payment_method,
+                MIN(t.booking_date) as travel_date
+FROM booking b
+LEFT JOIN payment p ON b.booking_id = p.booking_id
+LEFT JOIN ticket t ON b.booking_id = t.booking_id
+WHERE b.user_id = ?
+GROUP BY b.booking_id
+ORDER BY b.booking_date DESC;
+
+-- Get Tickets for a Booking
+SELECT t.ticket_id, t.seat_id, t.fare, t.booking_date, 
+       t.from_station_id, t.to_station_id, t.schedule_id,
+       s.seat_number, c.coach_type, c.name AS coach_name, 
+       tr.name AS train_name, tr.type AS train_type,
+       sc.start_time
+FROM ticket t
+JOIN seat s ON t.seat_id = s.seat_id
+JOIN coach c ON s.coach_id = c.coach_id
+JOIN train tr ON c.train_id = tr.train_id
+LEFT JOIN schedule sc ON t.schedule_id = sc.schedule_id
+WHERE t.booking_id = ?
+ORDER BY t.ticket_id ASC;
+
+-- Get Detailed Ticket Information with All Joins
+SELECT t.ticket_id, t.seat_id, t.fare, t.booking_date, t.from_station_id, 
+       t.to_station_id, t.schedule_id, t.booking_status,
+       s.seat_number, 
+       c.coach_type, c.name AS coach_name, c.coach_id,
+       tr.name AS train_name, tr.type AS train_type, tr.train_id,
+       sc.start_time
+FROM ticket t
+JOIN seat s ON t.seat_id = s.seat_id
+JOIN coach c ON s.coach_id = c.coach_id
+JOIN train tr ON c.train_id = tr.train_id
+LEFT JOIN schedule sc ON t.schedule_id = sc.schedule_id
+WHERE t.booking_id = ?
+ORDER BY t.ticket_id ASC;
+
+-- Get Booking Details with Payment
+SELECT b.booking_id, b.booking_date, b.total_amount, b.status,
+       p.payment_status, p.payment_method, p.payment_date
+FROM booking b
+LEFT JOIN payment p ON b.booking_id = p.booking_id
+WHERE b.booking_id = ? AND b.user_id = ?;
+
+-- Cancel Booking Request (Verify Ownership First)
+SELECT booking_id, status FROM booking 
+WHERE booking_id = ? AND user_id = ?;
+
+-- Update Booking to Cancel Requested
+UPDATE booking SET status = 'CancelRequested' WHERE booking_id = ?;
+
+-- Update Payment to Refund Requested
+UPDATE payment SET payment_status = 'RefundRequested' WHERE booking_id = ?;
+
+
+===============================================================================
+3. TRAIN & ROUTE MANAGEMENT
+===============================================================================
+
+-- Get All Stations (for dropdown)
+SELECT Station_id, name, city FROM stations 
+ORDER BY city, name;
+
+-- Get Station by ID
+SELECT name, city FROM stations WHERE Station_id = ? LIMIT 1;
+SELECT name, city FROM stations WHERE station_id = ? LIMIT 1;
+
+-- Search Trains Between Stations
+SELECT DISTINCT
+    t.train_id, t.name as train_name, t.type as train_type,
+    t.status, t.route_id, r.route_name,
+    rs_from.station_order as from_order,
+    rs_to.station_order as to_order,
+    rs_from.start_to_distance as from_distance,
+    rs_to.start_to_distance as to_distance
+FROM train t
+INNER JOIN route r ON t.route_id = r.route_id
+INNER JOIN route_station rs_from ON r.route_id = rs_from.route_id
+INNER JOIN route_station rs_to ON r.route_id = rs_to.route_id
+WHERE rs_from.station_id = ?
+AND rs_to.station_id = ?
+AND rs_from.station_order < rs_to.station_order
+AND t.status = 'Active'
+ORDER BY t.train_id;
+
+-- Check Train Running Day
+SELECT * FROM train_running_day 
+WHERE train_id = ? AND weekday = ?;
+
+-- Get Train Schedule
+SELECT schedule_id, route_id, start_time 
+FROM schedule 
+WHERE train_id = ? 
+LIMIT 1;
+
+-- Get Train Details by ID
+SELECT train_id, name as train_name, type as train_type, status 
+FROM train WHERE train_id = ?;
+
+-- Get Train with Route Info
+SELECT t.train_id, t.name, t.type, t.status, 
+       r.route_id, r.route_name, r.start_station_id, r.end_station_id,
+       r.total_distance
+FROM train t
+LEFT JOIN route r ON t.route_id = r.route_id
+WHERE t.train_id = ?;
+
+-- Get Basic Train Information (Simple Query)
+SELECT train_id, name as train_name, type as train_type, status 
+FROM train 
+WHERE train_id = ?;
+
+-- Get Route Total Distance
+SELECT total_distance FROM route WHERE route_id = ? LIMIT 1;
+
+-- Get Route Stations (Ordered)
+SELECT rs.station_order, rs.station_id, rs.start_to_distance, 
+       s.name, s.city 
+FROM route_station rs
+JOIN stations s ON rs.station_id = s.station_id
+WHERE rs.route_id = ?
+ORDER BY rs.station_order;
+
+-- Get Train Running Days
+SELECT weekday FROM train_running_day 
+WHERE train_id = ?
+ORDER BY FIELD(weekday, 'Saturday', 'Sunday', 'Monday', 'Tuesday', 
+               'Wednesday', 'Thursday', 'Friday');
+
+-- Get Total Seats for Train (All Coaches)
+SELECT COUNT(*) as total_seats
+FROM seat se
+INNER JOIN coach c ON se.coach_id = c.coach_id
+WHERE c.train_id = ?;
+
+
+===============================================================================
+4. SEAT & COACH OPERATIONS
+===============================================================================
+
+-- Get Coaches for a Train
+SELECT coach_id, name as coach_name, coach_type, seat_count 
+FROM coach WHERE coach_id = ?;
+
+-- Get Coaches with Available Seats (Non-Virtual Schedule)
+SELECT 
+    c.coach_id,
+    c.name as coach_name,
+    c.coach_type,
+    c.seat_count,
+    tp.price as fare_per_seat,
+    (c.seat_count - IFNULL((
+        SELECT COUNT(*)
+        FROM ticket tk
+        WHERE tk.schedule_id = ?
+        AND tk.seat_id LIKE CONCAT(c.coach_id, '%')
+        AND tk.booking_status != 'Cancelled'
+    ), 0)) as available_seats
+FROM coach c
+JOIN ticket_price tp ON c.coach_type = tp.coach_type
+WHERE c.train_id = ?
+ORDER BY 
+    CASE c.coach_type 
+        WHEN 'Snigdha' THEN 1 
+        WHEN 'Shovan Chair' THEN 2 
+        ELSE 3 
+    END,
+    c.name;
+
+-- Get Coaches with Price (Virtual Schedule)
+SELECT 
+    c.coach_id,
+    c.name as coach_name,
+    c.coach_type,
+    c.seat_count,
+    tp.price as fare_per_seat,
+    c.seat_count as available_seats
+FROM coach c
+JOIN ticket_price tp ON c.coach_type = tp.coach_type
+WHERE c.train_id = ?
+ORDER BY 
+    CASE c.coach_type 
+        WHEN 'Snigdha' THEN 1 
+        WHEN 'Shovan Chair' THEN 2 
+        ELSE 3 
+    END,
+    c.name;
+
+-- Get Coach with Seat Count
+SELECT c.coach_id, c.name as coach_name, c.coach_type, 
+       c.seat_count, COUNT(s.seat_id) as available_seats
+FROM coach c
+LEFT JOIN seat s ON c.coach_id = s.coach_id
+WHERE c.train_id = ? AND c.coach_type = ?
+GROUP BY c.coach_id;
+
+-- Get Total Seats in Coach
+SELECT COUNT(*) as total_seats
+FROM seat
+WHERE coach_id = ?;
+
+-- Get Available Seats in Coach (for a Schedule)
+SELECT COUNT(*) as available_seats
+FROM seat
+WHERE coach_id = ?
+AND seat_id NOT IN (
+    SELECT seat_id FROM ticket 
+    WHERE schedule_id = ? AND booking_status = 'Booked'
+);
+
+-- Get All Seats for a Coach
+SELECT seat_id, seat_number FROM seat 
+WHERE coach_id = ? 
+ORDER BY seat_number;
+
+-- Get Booked Seats for Schedule and Coach
+SELECT t.seat_id 
+FROM ticket t
+INNER JOIN seat s ON t.seat_id = s.seat_id
+WHERE s.coach_id = ?
+AND t.schedule_id = ?
+AND t.booking_status = 'Booked';
+
+-- Alternative Booked Seats Check (LIKE pattern)
+SELECT seat_id FROM ticket 
+WHERE schedule_id = ? 
+AND seat_id LIKE CONCAT(?, '%')
+AND booking_status != 'Cancelled';
+
+-- Get Distinct Coach Types for a Train
+SELECT DISTINCT coach_type
+FROM coach
+WHERE train_id = ?
+ORDER BY coach_type;
+
+-- Get Total and Booked Seats for Coach
+SELECT COUNT(*) as total_seats FROM seat WHERE coach_id = ?;
+SELECT COUNT(*) as booked_seats FROM ticket 
+WHERE coach_id = ? AND schedule_id = ? AND status = 'Booked';
+
+-- Get Total Seats for Train
+SELECT COUNT(*) as total_seats
+FROM seat se
+INNER JOIN coach c ON se.coach_id = c.coach_id
+WHERE c.train_id = ?;
+
+
+===============================================================================
+5. PAYMENT & REFUND OPERATIONS
+===============================================================================
+
+-- Insert Payment Record
+INSERT INTO payment (booking_id, user_id, amount, payment_method, 
+                     payment_date, payment_status) 
+VALUES (?, ?, ?, ?, NOW(), 'Paid');
+
+-- Get Ticket Prices
+SELECT coach_type, price FROM ticket_price 
+ORDER BY coach_type;
+
+-- Get Price for Specific Coach Type
+SELECT price FROM ticket_price WHERE coach_type = ?;
+
+-- Update Payment Status to Refunded
+UPDATE payment SET payment_status='Refunded' WHERE booking_id=?;
+
+-- Update Payment Status to Paid
+UPDATE payment SET payment_status='Paid' WHERE booking_id=?;
+
+
+===============================================================================
+6. ADMIN OPERATIONS
+===============================================================================
+
+-- Admin Login
+SELECT admin_id, username, password, name, email FROM admin 
+WHERE username = ? LIMIT 1;
+
+-- Get Dashboard Statistics
+SELECT COUNT(*) AS c FROM users;
+SELECT COUNT(*) AS c FROM booking;
+SELECT COUNT(*) AS c FROM train;
+SELECT COUNT(*) AS c FROM payment;
+
+-- Add New Station
+INSERT INTO stations (Station_id, station_code, name, city, division) 
+VALUES (?, ?, ?, ?, ?);
+
+-- Add New Route
+INSERT INTO route (route_id, route_name, start_station_id, 
+                   end_station_id, total_distance) 
+VALUES (?, ?, ?, ?, ?);
+
+-- Add New Train
+INSERT INTO train (train_id, name, type, status, route_id) 
+VALUES (?, ?, ?, ?, ?);
+
+-- Add New Schedule
+INSERT INTO schedule (schedule_id, train_id, route_id, 
+                      travel_date, start_time) 
+VALUES (?, ?, ?, ?, ?);
+
+-- Approve Refund (Update all related records)
+UPDATE payment SET payment_status='Refunded' WHERE booking_id=?;
+UPDATE booking SET status='Cancelled' WHERE booking_id=?;
+UPDATE ticket SET booking_status='Cancelled' WHERE booking_id=?;
+
+-- Decline Refund (Restore status)
+UPDATE payment SET payment_status='Paid' WHERE booking_id=?;
+UPDATE booking SET status='Completed' WHERE booking_id=?;
+UPDATE ticket SET booking_status='Booked' WHERE booking_id=?;
+
+-- Get All Stations (Admin Panel)
+SELECT Station_id, name, city FROM stations ORDER BY name;
+
+-- Get All Routes (Admin Panel)
+SELECT route_id, route_name FROM route ORDER BY route_id;
+
+-- Get All Trains (Admin Panel)
+SELECT train_id, name FROM train ORDER BY train_id;
+
+-- Get Trains with Route Info (Admin Panel)
+SELECT t.train_id, t.name, t.type, t.status, r.route_name 
+FROM train t 
+LEFT JOIN route r ON t.route_id=r.route_id 
+ORDER BY t.train_id;
+
+-- Get Refund Requests (Admin Panel)
+SELECT b.booking_id, b.user_id, b.total_amount, b.status, 
+       p.payment_status 
+FROM booking b 
+LEFT JOIN payment p ON b.booking_id=p.booking_id 
+ORDER BY b.booking_id DESC 
+LIMIT 15;
+
+
+===============================================================================
+7. SEARCH & FILTER QUERIES
+===============================================================================
+
+-- Filter Bookings - All
+WHERE b.user_id = ?
+
+-- Filter Bookings - Upcoming
+WHERE b.user_id = ? 
+AND b.status = 'Completed' 
+AND t.booking_date >= CURDATE()
+
+-- Filter Bookings - Completed
+WHERE b.user_id = ? 
+AND b.status = 'Completed' 
+AND t.booking_date < CURDATE()
+
+-- Filter Bookings - Cancelled
+WHERE b.user_id = ? 
+AND (b.status = 'Cancelled' OR b.status = 'CancelRequested')
+
+
+===============================================================================
+8. STATISTICS & REPORTS
+===============================================================================
+
+-- Total Seats in Train (All Coaches)
+SELECT COUNT(*) as total_seats
+FROM seat s
+JOIN coach c ON s.coach_id = c.coach_id
+WHERE c.train_id = ?;
+
+-- Available Seats for Schedule
+SELECT COUNT(*) as available_seats
+FROM seat
+WHERE coach_id = ?
+AND seat_id NOT IN (
+    SELECT seat_id FROM ticket 
+    WHERE schedule_id = ? 
+    AND booking_status = 'Booked'
+);
+
+-- Booking Count by Status
+SELECT status, COUNT(*) as count 
+FROM booking 
+WHERE user_id = ? 
+GROUP BY status;
+
+-- Total Seat Count for Coach  
+SELECT COUNT(*) as total_seats
+FROM seat se
+INNER JOIN coach c ON se.coach_id = c.coach_id
+WHERE c.train_id = ?;
+
+
+===============================================================================
+9. DATABASE SCHEMA CREATION (CREATE TABLE STATEMENTS)
+===============================================================================
+
+-- Admin Table
+CREATE TABLE `admin` (
+  `admin_id` int(11) NOT NULL AUTO_INCREMENT,
+  `username` varchar(50) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `email` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (`admin_id`),
+  UNIQUE KEY `username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Users Table
+CREATE TABLE `users` (
+  `user_id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `email` varchar(100) NOT NULL,
+  `phone` varchar(20) NOT NULL,
+  `nid` varchar(20) NOT NULL,
+  `pass` varchar(255) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`user_id`),
+  UNIQUE KEY `email` (`email`),
+  UNIQUE KEY `phone` (`phone`),
+  UNIQUE KEY `nid` (`nid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Stations Table
+CREATE TABLE `stations` (
+  `Station_id` int(11) NOT NULL,
+  `station_code` varchar(10) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `city` varchar(50) NOT NULL,
+  `division` varchar(50) NOT NULL,
+  PRIMARY KEY (`Station_id`),
+  UNIQUE KEY `station_code` (`station_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Route Table
+CREATE TABLE `route` (
+  `route_id` int(11) NOT NULL,
+  `route_name` varchar(100) NOT NULL,
+  `start_station_id` int(11) NOT NULL,
+  `end_station_id` int(11) NOT NULL,
+  `total_distance` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (`route_id`),
+  KEY `start_station_id` (`start_station_id`),
+  KEY `end_station_id` (`end_station_id`),
+  CONSTRAINT `route_ibfk_1` FOREIGN KEY (`start_station_id`) REFERENCES `stations` (`Station_id`),
+  CONSTRAINT `route_ibfk_2` FOREIGN KEY (`end_station_id`) REFERENCES `stations` (`Station_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Route Station Table (Junction)
+CREATE TABLE `route_station` (
+  `route_id` int(11) NOT NULL,
+  `station_id` int(11) NOT NULL,
+  `station_order` int(11) NOT NULL,
+  `start_to_distance` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (`route_id`,`station_id`),
+  KEY `station_id` (`station_id`),
+  CONSTRAINT `route_station_ibfk_1` FOREIGN KEY (`route_id`) REFERENCES `route` (`route_id`),
+  CONSTRAINT `route_station_ibfk_2` FOREIGN KEY (`station_id`) REFERENCES `stations` (`Station_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Train Table
+CREATE TABLE `train` (
+  `train_id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `type` enum('Mail','Intercity','Express','Commuter') NOT NULL,
+  `status` enum('Active','Inactive','Under Maintenance') DEFAULT 'Active',
+  `route_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`train_id`),
+  KEY `route_id` (`route_id`),
+  CONSTRAINT `train_ibfk_1` FOREIGN KEY (`route_id`) REFERENCES `route` (`route_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Train Running Day Table
+CREATE TABLE `train_running_day` (
+  `train_id` int(11) NOT NULL,
+  `weekday` enum('Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday') NOT NULL,
+  PRIMARY KEY (`train_id`,`weekday`),
+  CONSTRAINT `train_running_day_ibfk_1` FOREIGN KEY (`train_id`) REFERENCES `train` (`train_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Schedule Table
+CREATE TABLE `schedule` (
+  `schedule_id` int(11) NOT NULL,
+  `train_id` int(11) NOT NULL,
+  `route_id` int(11) NOT NULL,
+  `travel_date` date DEFAULT NULL,
+  `start_time` time NOT NULL,
+  PRIMARY KEY (`schedule_id`),
+  KEY `train_id` (`train_id`),
+  KEY `route_id` (`route_id`),
+  CONSTRAINT `schedule_ibfk_1` FOREIGN KEY (`train_id`) REFERENCES `train` (`train_id`),
+  CONSTRAINT `schedule_ibfk_2` FOREIGN KEY (`route_id`) REFERENCES `route` (`route_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Coach Table
+CREATE TABLE `coach` (
+  `coach_id` int(11) NOT NULL,
+  `name` varchar(50) NOT NULL,
+  `train_id` int(11) NOT NULL,
+  `coach_type` enum('Snigdha','Shovan Chair','Shovon') NOT NULL,
+  `seat_count` int(11) NOT NULL,
+  PRIMARY KEY (`coach_id`),
+  KEY `train_id` (`train_id`),
+  CONSTRAINT `coach_ibfk_1` FOREIGN KEY (`train_id`) REFERENCES `train` (`train_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Seat Table
+CREATE TABLE `seat` (
+  `seat_id` int(11) NOT NULL,
+  `coach_id` int(11) NOT NULL,
+  `seat_number` varchar(10) NOT NULL,
+  PRIMARY KEY (`seat_id`),
+  KEY `coach_id` (`coach_id`),
+  CONSTRAINT `seat_ibfk_1` FOREIGN KEY (`coach_id`) REFERENCES `coach` (`coach_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Ticket Price Table
+CREATE TABLE `ticket_price` (
+  `price_id` int(11) NOT NULL AUTO_INCREMENT,
+  `coach_type` enum('Snigdha','Shovan Chair','Shovon') NOT NULL,
+  `price` decimal(10,2) NOT NULL,
+  PRIMARY KEY (`price_id`),
+  UNIQUE KEY `coach_type` (`coach_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Booking Table
+CREATE TABLE `booking` (
+  `booking_id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `booking_date` timestamp NOT NULL DEFAULT current_timestamp(),
+  `total_amount` decimal(10,2) NOT NULL,
+  `status` enum('Pending','Completed','CancelRequested','Cancelled') DEFAULT 'Pending',
+  PRIMARY KEY (`booking_id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `booking_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Ticket Table
+CREATE TABLE `ticket` (
+  `ticket_id` int(11) NOT NULL AUTO_INCREMENT,
+  `booking_id` int(11) NOT NULL,
+  `schedule_id` int(11) DEFAULT NULL,
+  `user_id` int(11) NOT NULL,
+  `from_station_id` int(11) NOT NULL,
+  `to_station_id` int(11) NOT NULL,
+  `seat_id` int(11) NOT NULL,
+  `quantity` int(11) DEFAULT 1,
+  `booking_status` enum('Booked','Cancelled') DEFAULT 'Booked',
+  `fare` decimal(10,2) NOT NULL,
+  `booking_date` date NOT NULL,
+  `coach_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`ticket_id`),
+  KEY `booking_id` (`booking_id`),
+  KEY `user_id` (`user_id`),
+  KEY `seat_id` (`seat_id`),
+  KEY `from_station_id` (`from_station_id`),
+  KEY `to_station_id` (`to_station_id`),
+  CONSTRAINT `ticket_ibfk_1` FOREIGN KEY (`booking_id`) REFERENCES `booking` (`booking_id`),
+  CONSTRAINT `ticket_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`),
+  CONSTRAINT `ticket_ibfk_3` FOREIGN KEY (`seat_id`) REFERENCES `seat` (`seat_id`),
+  CONSTRAINT `ticket_ibfk_4` FOREIGN KEY (`from_station_id`) REFERENCES `stations` (`Station_id`),
+  CONSTRAINT `ticket_ibfk_5` FOREIGN KEY (`to_station_id`) REFERENCES `stations` (`Station_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Booking Detail Table
+CREATE TABLE `booking_detail` (
+  `detail_id` int(11) NOT NULL AUTO_INCREMENT,
+  `booking_id` int(11) NOT NULL,
+  `seat_id` int(11) NOT NULL,
+  `price` decimal(10,2) NOT NULL,
+  `status` enum('Booked','Cancelled') DEFAULT 'Booked',
+  PRIMARY KEY (`detail_id`),
+  KEY `booking_id` (`booking_id`),
+  KEY `seat_id` (`seat_id`),
+  CONSTRAINT `booking_detail_ibfk_1` FOREIGN KEY (`booking_id`) REFERENCES `booking` (`booking_id`),
+  CONSTRAINT `booking_detail_ibfk_2` FOREIGN KEY (`seat_id`) REFERENCES `seat` (`seat_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Payment Table
+CREATE TABLE `payment` (
+  `payment_id` int(11) NOT NULL AUTO_INCREMENT,
+  `booking_id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `payment_method` varchar(50) NOT NULL,
+  `payment_date` timestamp NOT NULL DEFAULT current_timestamp(),
+  `payment_status` enum('Paid','Refunded','RefundRequested','Pending') DEFAULT 'Pending',
+  PRIMARY KEY (`payment_id`),
+  KEY `booking_id` (`booking_id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `payment_ibfk_1` FOREIGN KEY (`booking_id`) REFERENCES `booking` (`booking_id`),
+  CONSTRAINT `payment_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+===============================================================================
+10. SAMPLE DATA INSERT STATEMENTS
+===============================================================================
+
+-- Insert Ticket Price Data
+INSERT INTO `ticket_price` (`price_id`, `coach_type`, `price`) VALUES
+(1, 'Snigdha', 850.00),
+(2, 'Shovan Chair', 350.00),
+(3, 'Shovon', 250.00);
+
+-- Insert Sample Route
+INSERT INTO `route` (`route_id`, `route_name`, `start_station_id`, `end_station_id`, `total_distance`) VALUES
+(1, 'Dhaka-Chittagong Main Line', 1, 10, 320.50);
+
+-- Insert Sample Train
+INSERT INTO `train` (`train_id`, `name`, `type`, `status`, `route_id`) VALUES
+(701, 'Suborno Express', 'Mail', 'Active', 1);
+
+-- Insert Train Running Days
+INSERT INTO `train_running_day` (`train_id`, `weekday`) VALUES
+(701, 'Saturday'),
+(701, 'Sunday'),
+(701, 'Monday'),
+(701, 'Tuesday'),
+(701, 'Wednesday'),
+(701, 'Thursday'),
+(701, 'Friday');
+
+-- Insert Sample Schedule
+INSERT INTO `schedule` (`schedule_id`, `train_id`, `route_id`, `travel_date`, `start_time`) VALUES
+(1, 701, 1, '2026-02-01', '08:00:00');
+
+-- Insert Sample Coach
+INSERT INTO `coach` (`coach_id`, `name`, `train_id`, `coach_type`, `seat_count`) VALUES
+(70101, 'Ka', 701, 'Snigdha', 56);
+
+-- Insert Sample Seats (Auto-generated pattern)
+INSERT INTO seat (seat_id, coach_id, seat_number)
+VALUES (?, ?, ?);
+-- Example: (7010101, 70101, 'A1')
+
+-- Insert Sample Station
+INSERT INTO `stations` (`Station_id`, `station_code`, `name`, `city`, `division`) VALUES
+(1, 'DHAKA', 'Kamalapur', 'Dhaka', 'Dhaka');
+
+
+===============================================================================
+COMMON PREPARED STATEMENT PATTERNS
+===============================================================================
+
+-- Standard Prepared Statement Usage Pattern:
+$stmt = $conn->prepare("SELECT ... FROM ... WHERE column = ?");
+$stmt->bind_param("s", $variable);  // s=string, i=integer, d=double
+$stmt->execute();
+$result = $stmt->get_result();
+$row = $result->fetch_assoc();
+$stmt->close();
+
+-- Transaction Pattern (for multiple updates):
+$conn->begin_transaction();
+try {
+    // Multiple UPDATE/INSERT statements
+    $conn->commit();
+} catch (Exception $e) {
+    $conn->rollback();
+}
+
+
+===============================================================================
+IMPORTANT NOTES
+===============================================================================
+
+1. All user inputs should use prepared statements to prevent SQL injection
+2. Date format: YYYY-MM-DD for travel_date
+3. Weekday format: Full day name (e.g., 'Monday', 'Tuesday')
+4. Status values:
+   - Booking: 'Pending', 'Completed', 'CancelRequested', 'Cancelled'
+   - Payment: 'Paid', 'Refunded', 'RefundRequested', 'Pending'
+   - Ticket booking_status: 'Booked', 'Cancelled'
+5. Always check seat availability before booking
+6. Use transactions for multi-table operations (booking + payment + tickets)
+
+QUERY OPTIMIZATIONS:
+- Use indexes on frequently searched columns (station_id, train_id, booking_id)
+- JOIN operations are optimized with foreign key indexes
+- Use LIMIT for pagination on large result sets
+- GROUP BY is used with aggregate functions (COUNT, MIN, MAX)
+- CASE statements in ORDER BY for custom sorting
+- Subqueries in WHERE clauses for availability checks
+
+TRANSACTION HANDLING:
+- Booking process uses transactions to ensure data integrity
+- COMMIT on success, ROLLBACK on error
+- All related tables (booking, ticket, payment) updated atomically
+
+VIRTUAL SCHEDULES:
+- Schedules with 'VIRTUAL_' prefix are dynamically generated
+- Used when no schedule exists in database
+- Full seat availability for virtual schedules
+
+SEAT NUMBERING CONVENTION:
+- Seats numbered by row and position (A1, A2, B1, B2, etc.)
+- Window seats: positions 1 and 4 in each row
+- 2x2 configuration per row (2 seats + aisle + 2 seats)
+
+BOOKING FLOW:
+1. Search trains (dashboard.php)
+2. Select coach (book_ticket.php)
+3. Select seats (seat_selection.php)
+4. Process booking (process_booking.php)
+5. Confirm & display (confirmation.php)
+6. View/Print (my_bookings.php, print_ticket.php)
+
+CANCELLATION FLOW:
+1. User requests cancellation (status → 'CancelRequested')
+2. Payment status → 'RefundRequested'
+3. Admin reviews in admin panel
+4. Admin approves: status → 'Cancelled', payment → 'Refunded'
+5. Admin declines: restore to 'Completed', payment → 'Paid'
+
+
+===============================================================================
+11. QUERIES BY FILE - DETAILED DOCUMENTATION
+===============================================================================
+
+This section documents all SQL queries used in each PHP file with their 
+specific purpose and usage context.
+
+-----------------------------------
+FILE: pages/dashboard.php
+PURPOSE: Main user dashboard with train search functionality
+-----------------------------------
+
+QUERY 1: Get Station Name and City (From Station)
+SQL: SELECT name, city FROM stations WHERE Station_id = ? LIMIT 1
+USE: Fetch departure station details for display in search results
+PARAMS: from_station (selected by user)
+
+QUERY 2: Get Station Name and City (To Station)
+SQL: SELECT name, city FROM stations WHERE Station_id = ? LIMIT 1
+USE: Fetch arrival station details for display in search results
+PARAMS: to_station (selected by user)
+
+QUERY 3: Search Trains Between Two Stations
+SQL: SELECT DISTINCT
+        t.train_id, t.name as train_name, t.type as train_type,
+        t.status, t.route_id, r.route_name,
+        rs_from.station_order as from_order,
+        rs_to.station_order as to_order,
+        rs_from.start_to_distance as from_distance,
+        rs_to.start_to_distance as to_distance
+     FROM train t
+     INNER JOIN route r ON t.route_id = r.route_id
+     INNER JOIN route_station rs_from ON r.route_id = rs_from.route_id
+     INNER JOIN route_station rs_to ON r.route_id = rs_to.route_id
+     WHERE rs_from.station_id = ?
+     AND rs_to.station_id = ?
+     AND rs_from.station_order < rs_to.station_order
+     AND t.status = 'Active'
+     ORDER BY t.train_id
+USE: Find all trains that connect two stations on a specific route
+PARAMS: from_station, to_station
+NOTES: Ensures station order (from must come before to), only active trains
+
+QUERY 4: Check Train Running Day
+SQL: SELECT * FROM train_running_day 
+     WHERE train_id = ? AND weekday = ?
+USE: Verify if train operates on the selected travel date's weekday
+PARAMS: train_id, day_of_week (calculated from travel_date)
+NOTES: Filters trains that don't run on selected day
+
+QUERY 5: Get Train Schedule
+SQL: SELECT schedule_id, route_id, start_time 
+     FROM schedule 
+     WHERE train_id = ? 
+     LIMIT 1
+USE: Get any available schedule for the train (used for schedule_id)
+PARAMS: train_id
+NOTES: Returns first matching schedule regardless of date
+
+QUERY 6: Get Total Seats for Train
+SQL: SELECT COUNT(*) as total_seats
+     FROM seat se
+     INNER JOIN coach c ON se.coach_id = c.coach_id
+     WHERE c.train_id = ?
+USE: Calculate total seat capacity across all coaches
+PARAMS: train_id
+
+QUERY 7: Get Available Seats for Schedule
+SQL: SELECT COUNT(*) as available_seats
+     FROM seat se
+     INNER JOIN coach c ON se.coach_id = c.coach_id
+     WHERE c.train_id = ?
+     AND se.seat_id NOT IN (
+         SELECT seat_id FROM ticket 
+         WHERE schedule_id = ? AND booking_status != 'Cancelled'
+     )
+USE: Count seats not yet booked for specific schedule and date
+PARAMS: train_id, schedule_id
+NOTES: Excludes cancelled bookings from count
+
+QUERY 8: Get Coach Types for Train
+SQL: SELECT DISTINCT coach_type
+     FROM coach
+     WHERE train_id = ?
+USE: List all available coach types (AC, Non-AC, etc.) for display
+PARAMS: train_id
+
+QUERY 9: Get All Stations for Dropdown
+SQL: SELECT Station_id, name, city FROM stations ORDER BY city, name
+USE: Populate departure and arrival station dropdowns
+NOTES: Direct query (no params), sorted by city then name
+
+QUERY 10: Get Ticket Prices
+SQL: SELECT coach_type, price FROM ticket_price ORDER BY coach_type
+USE: Fetch pricing information for fare calculations
+NOTES: Direct query, returns all coach type prices
+
+
+-----------------------------------
+FILE: pages/train_details.php
+PURPOSE: Display detailed train information and availability
+-----------------------------------
+
+QUERY 1: Get Train with Schedule (Multiple Fallback Attempts)
+
+Attempt 1 - Exact Match with Date:
+SQL: SELECT t.train_id, t.name as train_name, t.type, t.status,
+            s.schedule_id, s.travel_date, s.start_time,
+            COALESCE(r.route_name, 'N/A') as route_name,
+            COALESCE(r.route_id, '') as route_id
+     FROM schedule s
+     INNER JOIN train t ON s.train_id = t.train_id
+     LEFT JOIN route r ON t.route_id = r.route_id
+     WHERE s.schedule_id = ? AND s.train_id = ? AND DATE(s.travel_date) = ?
+USE: Try to find train with exact schedule and date match
+PARAMS: schedule_id, train_id, travel_date
+
+Attempt 2 - Without Date Constraint:
+SQL: (Same as above, but without DATE(s.travel_date) = ?)
+USE: If exact date not found, try any matching schedule
+PARAMS: schedule_id, train_id
+
+Attempt 3 - Any Schedule for Train:
+SQL: (Same structure but WHERE s.train_id = ? only)
+USE: Get any schedule for the train if specific one not found
+PARAMS: train_id
+
+Attempt 4 - Train Without Schedule:
+SQL: SELECT t.train_id, t.name as train_name, t.type, t.status,
+            COALESCE(r.route_name, 'N/A') as route_name,
+            COALESCE(r.route_id, '') as route_id
+     FROM train t
+     LEFT JOIN route r ON t.route_id = r.route_id
+     WHERE t.train_id = ?
+USE: Last resort - get train info without requiring schedule
+PARAMS: train_id
+NOTES: Uses default time if no schedule exists
+
+QUERY 2: Get From Station Details
+SQL: SELECT Station_id, name, city FROM stations WHERE Station_id = ? LIMIT 1
+USE: Fetch departure station information
+PARAMS: from_station
+
+QUERY 3: Get To Station Details
+SQL: SELECT Station_id, name, city FROM stations WHERE Station_id = ? LIMIT 1
+USE: Fetch arrival station information
+PARAMS: to_station
+
+QUERY 4: Get Distinct Coach Types
+SQL: SELECT DISTINCT c.coach_id, c.coach_type 
+     FROM coach c 
+     WHERE c.train_id = ? 
+     ORDER BY c.coach_type
+USE: Get all coach types available on this train
+PARAMS: train_id
+
+QUERY 5: Get Total Seats in Coach
+SQL: SELECT COUNT(*) as total_seats FROM seat WHERE coach_id = ?
+USE: Count total seats for each coach
+PARAMS: coach_id
+NOTES: Runs in loop for each coach
+
+QUERY 6: Get Booked Seats for Coach
+SQL: SELECT COUNT(*) as booked_seats 
+     FROM ticket 
+     WHERE coach_id = ? AND schedule_id = ? AND status = 'Booked'
+USE: Count already booked seats for this coach on this schedule
+PARAMS: coach_id, schedule_id
+NOTES: Calculates available_seats = total_seats - booked_seats
+
+QUERY 7: Get Ticket Price by Coach Type
+SQL: SELECT coach_type, price FROM ticket_price WHERE coach_type = ? LIMIT 1
+USE: Get fare for specific coach type
+PARAMS: coach_type
+NOTES: Runs for each unique coach type
+
+QUERY 8: Get Route Distance
+SQL: SELECT total_distance FROM route WHERE route_id = ? LIMIT 1
+USE: Get total route distance for duration estimation
+PARAMS: route_id
+
+QUERY 9: Get Route Stations with Distances
+SQL: SELECT rs.station_order, rs.station_id, rs.start_to_distance, 
+            s.name, s.city 
+     FROM route_station rs 
+     JOIN stations s ON rs.station_id = s.station_id 
+     WHERE rs.route_id = ? 
+     ORDER BY rs.station_order ASC
+USE: Get all stations on the route with their order and distances
+PARAMS: route_id
+NOTES: Used to display complete route with all stops
+
+
+-----------------------------------
+FILE: pages/book_ticket.php
+PURPOSE: Coach selection page (Step 1 of booking)
+-----------------------------------
+
+QUERY 1: Get Basic Train Information
+SQL: SELECT train_id, name as train_name, type as train_type, status 
+     FROM train 
+     WHERE train_id = '$train_id'
+USE: Fetch train details for display
+NOTES: Uses direct string interpolation (should be prepared statement)
+
+QUERY 2: Get Coaches with Availability (Non-Virtual Schedule)
+SQL: SELECT 
+        c.coach_id, c.name as coach_name, c.coach_type, c.seat_count,
+        tp.price as fare_per_seat,
+        (c.seat_count - IFNULL((
+            SELECT COUNT(*)
+            FROM ticket tk
+            WHERE tk.schedule_id = '$schedule_id'
+            AND tk.seat_id LIKE CONCAT(c.coach_id, '%')
+            AND tk.booking_status != 'Cancelled'
+        ), 0)) as available_seats
+     FROM coach c
+     JOIN ticket_price tp ON c.coach_type = tp.coach_type
+     WHERE c.train_id = '$train_id'
+     ORDER BY CASE c.coach_type 
+         WHEN 'Snigdha' THEN 1 
+         WHEN 'Shovan Chair' THEN 2 
+         ELSE 3 
+     END, c.name
+USE: Get all coaches with calculated seat availability for booking
+PARAMS: schedule_id (in subquery), train_id
+NOTES: Uses IFNULL for null-safe counting, CASE for custom sorting
+
+QUERY 3: Get Coaches (Virtual Schedule - Full Availability)
+SQL: SELECT 
+        c.coach_id, c.name as coach_name, c.coach_type, c.seat_count,
+        tp.price as fare_per_seat, c.seat_count as available_seats
+     FROM coach c
+     JOIN ticket_price tp ON c.coach_type = tp.coach_type
+     WHERE c.train_id = '$train_id'
+     ORDER BY (same CASE as above)
+USE: Get coaches when schedule is virtual (no existing bookings)
+PARAMS: train_id
+NOTES: All seats shown as available for new schedules
+
+
+-----------------------------------
+FILE: pages/seat_selection.php
+PURPOSE: Seat map display and selection (Step 2 of booking)
+-----------------------------------
+
+QUERY 1: Get Train Details
+SQL: SELECT train_id, name as train_name, type FROM train WHERE train_id = ?
+USE: Display train information at top of page
+PARAMS: train_id
+
+QUERY 2: Get Coach Details
+SQL: SELECT coach_id, name as coach_name, coach_type, seat_count 
+     FROM coach 
+     WHERE coach_id = ?
+USE: Get selected coach information
+PARAMS: coach_id
+
+QUERY 3: Get Price for Coach Type
+SQL: SELECT price FROM ticket_price WHERE coach_type = ?
+USE: Fetch fare per seat for price calculations
+PARAMS: coach_type
+
+QUERY 4: Get From Station Name
+SQL: SELECT name, city FROM stations WHERE station_id = ?
+USE: Display departure station
+PARAMS: from_station
+
+QUERY 5: Get To Station Name
+SQL: SELECT name, city FROM stations WHERE station_id = ?
+USE: Display arrival station
+PARAMS: to_station
+
+QUERY 6: Get All Seats for Coach
+SQL: SELECT seat_id, seat_number FROM seat 
+     WHERE coach_id = ? 
+     ORDER BY seat_number
+USE: Display complete seat map for the coach
+PARAMS: coach_id
+NOTES: Ordered by seat_number for proper layout (A1, A2, B1, etc.)
+
+QUERY 7: Get Booked Seats for Schedule
+SQL: SELECT t.seat_id 
+     FROM ticket t
+     INNER JOIN seat s ON t.seat_id = s.seat_id
+     WHERE s.coach_id = ?
+     AND t.schedule_id = ?
+     AND t.booking_status = 'Booked'
+USE: Mark seats as unavailable (already booked)
+PARAMS: coach_id, schedule_id
+NOTES: Returns array of booked seat IDs for visual marking
+
+
+-----------------------------------
+FILE: process/process_booking.php
+PURPOSE: Backend booking creation and ticket generation
+-----------------------------------
+
+QUERY 1: Create New Booking
+SQL: INSERT INTO booking (user_id, booking_date, total_amount, status) 
+     VALUES (?, ?, ?, 'Pending')
+USE: Create initial booking record with Pending status
+PARAMS: user_id, current_date, total_amount
+RETURNS: booking_id (via insert_id)
+
+QUERY 2: Check Seat Availability
+SQL: SELECT ticket_id FROM ticket 
+     WHERE schedule_id = ? AND seat_id = ? AND booking_status = 'Booked'
+USE: Verify seat not already booked before inserting ticket
+PARAMS: schedule_id, seat_id
+NOTES: Runs for each selected seat, prevents double-booking
+
+QUERY 3: Insert Ticket Record
+SQL: INSERT INTO ticket 
+     (booking_id, schedule_id, user_id, from_station_id, to_station_id, 
+      seat_id, quantity, booking_status, fare, booking_date) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'Booked', ?, ?)
+USE: Create individual ticket for each seat
+PARAMS: booking_id, schedule_id, user_id, from_station, to_station, 
+        seat_id, quantity(1), fare, travel_date
+NOTES: Runs in loop for each selected seat
+
+QUERY 4: Insert Booking Detail
+SQL: INSERT INTO booking_detail (booking_id, seat_id, price, status) 
+     VALUES (?, ?, ?, 'Booked')
+USE: Create detail record linking booking to seat with price
+PARAMS: booking_id, seat_id, price_per_seat
+NOTES: Runs for each seat
+
+QUERY 5: Insert Payment Record
+SQL: INSERT INTO payment 
+     (booking_id, user_id, amount, payment_method, 
+      payment_date, payment_status) 
+     VALUES (?, ?, ?, ?, NOW(), 'Paid')
+USE: Record payment for the booking
+PARAMS: booking_id, user_id, total_amount, payment_method('Online')
+RETURNS: payment_id
+
+QUERY 6: Update Booking Status to Completed
+SQL: UPDATE booking SET status = 'Completed' WHERE booking_id = ?
+USE: Mark booking as completed after all tickets and payment created
+PARAMS: booking_id
+NOTES: Transaction commits only if all queries succeed
+
+
+-----------------------------------
+FILE: pages/confirmation.php
+PURPOSE: Display booking confirmation with ticket details
+-----------------------------------
+
+QUERY 1: Get Booking with Payment Info
+SQL: SELECT b.*, p.payment_id, p.payment_status, p.payment_method
+     FROM booking b
+     JOIN payment p ON b.booking_id = p.booking_id
+     WHERE b.booking_id = ? AND b.user_id = ?
+USE: Verify booking exists and belongs to user, get payment details
+PARAMS: booking_id, user_id
+
+QUERY 2: Get All Tickets for Booking
+SQL: SELECT t.*, s.seat_number, c.coach_type, c.name as coach_name, 
+            tr.name as train_name
+     FROM ticket t
+     JOIN seat s ON t.seat_id = s.seat_id
+     JOIN coach c ON s.coach_id = c.coach_id
+     JOIN train tr ON c.train_id = tr.train_id
+     WHERE t.booking_id = ?
+USE: Get complete ticket details with seat, coach, and train info
+PARAMS: booking_id
+
+QUERY 3: Get From Station Details
+SQL: SELECT name, city FROM stations WHERE station_id = ?
+USE: Display departure station name
+PARAMS: from_station_id (from ticket)
+
+QUERY 4: Get To Station Details
+SQL: SELECT name, city FROM stations WHERE station_id = ?
+USE: Display arrival station name
+PARAMS: to_station_id (from ticket)
+
+
+-----------------------------------
+FILE: pages/my_bookings.php
+PURPOSE: User's booking history with filters
+-----------------------------------
+
+QUERY 1: Get Filtered Bookings
+SQL: SELECT DISTINCT b.booking_id, b.booking_date, b.total_amount, 
+            b.status, p.payment_status, p.payment_method,
+            MIN(t.booking_date) as travel_date
+     FROM booking b
+     LEFT JOIN payment p ON b.booking_id = p.booking_id
+     LEFT JOIN ticket t ON b.booking_id = t.booking_id
+     WHERE b.user_id = ? [+ filter conditions]
+     GROUP BY b.booking_id
+     ORDER BY b.booking_date DESC, b.booking_id DESC
+USE: Get user's bookings with optional filters (all/upcoming/completed/cancelled)
+PARAMS: user_id
+FILTERS: 
+  - upcoming: + AND b.status = 'Completed' AND t.booking_date >= CURDATE()
+  - completed: + AND b.status = 'Completed' AND t.booking_date < CURDATE()
+  - cancelled: + AND (b.status = 'Cancelled' OR b.status = 'CancelRequested')
+
+QUERY 2: Get Tickets for Each Booking
+SQL: SELECT t.ticket_id, t.seat_id, t.fare, t.booking_date, 
+            t.from_station_id, t.to_station_id, t.schedule_id,
+            s.seat_number, c.coach_type, c.name AS coach_name, 
+            tr.name AS train_name, tr.type AS train_type, sc.start_time
+     FROM ticket t
+     JOIN seat s ON t.seat_id = s.seat_id
+     JOIN coach c ON s.coach_id = c.coach_id
+     JOIN train tr ON c.train_id = tr.train_id
+     LEFT JOIN schedule sc ON t.schedule_id = sc.schedule_id
+     WHERE t.booking_id = ?
+USE: Get detailed ticket information for displaying in booking cards
+PARAMS: booking_id
+NOTES: Runs for each booking in the list
+
+QUERY 3: Get From Station (for each booking)
+SQL: SELECT name, city FROM stations WHERE station_id = ?
+USE: Display departure station
+PARAMS: from_station_id
+
+QUERY 4: Get To Station (for each booking)
+SQL: SELECT name, city FROM stations WHERE station_id = ?
+USE: Display arrival station
+PARAMS: to_station_id
+
+
+-----------------------------------
+FILE: pages/print_ticket.php
+PURPOSE: Printable ticket format
+-----------------------------------
+
+QUERY 1: Verify Booking Ownership
+SQL: SELECT b.booking_id, b.booking_date, b.total_amount, b.status,
+            p.payment_status, p.payment_method, p.payment_date
+     FROM booking b
+     LEFT JOIN payment p ON b.booking_id = p.booking_id
+     WHERE b.booking_id = ? AND b.user_id = ?
+USE: Security check - ensure booking belongs to logged-in user
+PARAMS: booking_id, user_id
+
+QUERY 2: Get Tickets with Full Details
+SQL: SELECT t.ticket_id, t.seat_id, t.fare, t.booking_date, 
+            t.from_station_id, t.to_station_id, t.schedule_id,
+            s.seat_number, c.coach_type, c.name AS coach_name, c.coach_id,
+            tr.name AS train_name, tr.type AS train_type, tr.train_id,
+            sc.start_time
+     FROM ticket t
+     JOIN seat s ON t.seat_id = s.seat_id
+     JOIN coach c ON s.coach_id = c.coach_id
+     JOIN train tr ON c.train_id = tr.train_id
+     LEFT JOIN schedule sc ON t.schedule_id = sc.schedule_id
+     WHERE t.booking_id = ?
+USE: Get all ticket details for printing
+PARAMS: booking_id
+
+QUERY 3 & 4: Get Station Details (same as other files)
+USE: Display journey origin and destination
+
+
+-----------------------------------
+FILE: pages/ticket.php
+PURPOSE: Detailed ticket list view with cancel functionality
+-----------------------------------
+
+QUERY 1: Get All User Bookings
+SQL: SELECT b.booking_id, b.booking_date, b.total_amount, b.status, 
+            p.payment_status, p.payment_method
+     FROM booking b
+     LEFT JOIN payment p ON b.booking_id = p.booking_id
+     WHERE b.user_id = ?
+     ORDER BY b.booking_date DESC, b.booking_id DESC
+USE: List all bookings for the user
+PARAMS: user_id
+
+QUERY 2: Get Detailed Tickets (with all joins, same as my_bookings.php)
+USE: Display expandable ticket details
+
+QUERY 3 & 4: Get Station Names (same pattern)
+
+
+-----------------------------------
+FILE: pages/profile.php
+PURPOSE: Display user profile information
+-----------------------------------
+
+QUERY 1: Get User Profile Data
+SQL: SELECT user_id, name, email, phone, nid, created_at 
+     FROM users 
+     WHERE user_id = ? LIMIT 1
+USE: Fetch and display all user account information
+PARAMS: user_id
+
+
+-----------------------------------
+FILE: process/process_cancel_request.php
+PURPOSE: Handle booking cancellation requests
+-----------------------------------
+
+QUERY 1: Verify Booking Ownership
+SQL: SELECT booking_id, status FROM booking 
+     WHERE booking_id = ? AND user_id = ?
+USE: Check booking exists and belongs to user before cancellation
+PARAMS: booking_id, user_id
+
+QUERY 2: Update Booking to CancelRequested
+SQL: UPDATE booking SET status = 'CancelRequested' WHERE booking_id = ?
+USE: Mark booking as pending admin review for cancellation
+PARAMS: booking_id
+
+QUERY 3: Update Payment to RefundRequested
+SQL: UPDATE payment SET payment_status = 'RefundRequested' 
+     WHERE booking_id = ?
+USE: Mark payment for refund processing
+PARAMS: booking_id
+
+
+-----------------------------------
+FILE: pages/admin_dashboard.php
+PURPOSE: Admin statistics dashboard
+-----------------------------------
+
+QUERY 1: Count Total Users
+SQL: SELECT COUNT(*) AS c FROM users
+USE: Display total registered users count
+
+QUERY 2: Count Total Bookings
+SQL: SELECT COUNT(*) AS c FROM booking
+USE: Display total bookings count
+
+QUERY 3: Count Total Trains
+SQL: SELECT COUNT(*) AS c FROM train
+USE: Display total trains in system
+
+QUERY 4: Count Total Payments
+SQL: SELECT COUNT(*) AS c FROM payment
+USE: Display total payment transactions
+
+
+-----------------------------------
+FILE: pages/admin_manage.php
+PURPOSE: Admin panel for managing stations, routes, trains, refunds
+-----------------------------------
+
+ADD OPERATIONS:
+
+QUERY 1: Insert New Station
+SQL: INSERT INTO stations (Station_id, station_code, name, city, division) 
+     VALUES (?, ?, ?, ?, ?)
+USE: Add new railway station to system
+PARAMS: station_id, code, name, city, division
+
+QUERY 2: Insert New Route
+SQL: INSERT INTO route 
+     (route_id, route_name, start_station_id, end_station_id, total_distance) 
+     VALUES (?, ?, ?, ?, ?)
+USE: Create new train route between stations
+PARAMS: route_id, name, start_station, end_station, distance
+
+QUERY 3: Insert New Train
+SQL: INSERT INTO train (train_id, name, type, status, route_id) 
+     VALUES (?, ?, ?, ?, ?)
+USE: Add new train to the system
+PARAMS: train_id, name, type, status, route_id
+
+QUERY 4: Insert New Schedule
+SQL: INSERT INTO schedule 
+     (schedule_id, train_id, route_id, travel_date, start_time) 
+     VALUES (?, ?, ?, ?, ?)
+USE: Create schedule for train on specific date
+PARAMS: schedule_id, train_id, route_id, date, time
+
+REFUND OPERATIONS (APPROVE):
+
+QUERY 5: Update Payment to Refunded
+SQL: UPDATE payment SET payment_status='Refunded' WHERE booking_id=?
+USE: Mark payment as refunded after admin approval
+PARAMS: booking_id
+
+QUERY 6: Update Booking to Cancelled
+SQL: UPDATE booking SET status='Cancelled' WHERE booking_id=?
+USE: Mark booking as cancelled
+PARAMS: booking_id
+
+QUERY 7: Update Tickets to Cancelled
+SQL: UPDATE ticket SET booking_status='Cancelled' WHERE booking_id=?
+USE: Cancel all tickets in the booking
+PARAMS: booking_id
+
+REFUND OPERATIONS (DECLINE):
+
+QUERY 8: Restore Payment to Paid
+SQL: UPDATE payment SET payment_status='Paid' WHERE booking_id=?
+USE: Restore payment status after admin declines refund
+PARAMS: booking_id
+
+QUERY 9: Restore Booking to Completed
+SQL: UPDATE booking SET status='Completed' WHERE booking_id=?
+USE: Restore booking status
+PARAMS: booking_id
+
+QUERY 10: Restore Tickets to Booked
+SQL: UPDATE ticket SET booking_status='Booked' WHERE booking_id=?
+USE: Restore ticket status
+PARAMS: booking_id
+
+FETCH OPERATIONS FOR DROPDOWNS:
+
+QUERY 11: Get All Stations
+SQL: SELECT Station_id, name, city FROM stations ORDER BY name
+USE: Populate station dropdowns in admin forms
+
+QUERY 12: Get All Routes
+SQL: SELECT route_id, route_name FROM route ORDER BY route_id
+USE: Populate route dropdowns
+
+QUERY 13: Get All Trains
+SQL: SELECT train_id, name FROM train ORDER BY train_id
+USE: Populate train dropdowns
+
+QUERY 14: Get Trains with Route Info
+SQL: SELECT t.train_id, t.name, t.type, t.status, r.route_name 
+     FROM train t 
+     LEFT JOIN route r ON t.route_id=r.route_id 
+     ORDER BY t.train_id
+USE: Display train list with associated routes
+
+QUERY 15: Get Recent Refund Requests
+SQL: SELECT b.booking_id, b.user_id, b.total_amount, b.status, 
+            p.payment_status 
+     FROM booking b 
+     LEFT JOIN payment p ON b.booking_id=p.booking_id 
+     ORDER BY b.booking_id DESC 
+     LIMIT 15
+USE: Display recent bookings for refund management
+
+
+-----------------------------------
+FILE: process/process_admin_login.php
+PURPOSE: Admin authentication
+-----------------------------------
+
+QUERY 1: Admin Login Verification
+SQL: SELECT admin_id, username, password, name, email 
+     FROM admin 
+     WHERE username = ? LIMIT 1
+USE: Authenticate admin user and fetch admin details
+PARAMS: username
+NOTES: Password verification done in PHP after fetch
+
+
+-----------------------------------
+FILE: pages/login.php
+PURPOSE: User authentication with remember me
+-----------------------------------
+
+QUERY 1: Login by Email
+SQL: SELECT user_id, name, email, phone, pass 
+     FROM users 
+     WHERE email = ? LIMIT 1
+USE: Find user by email address for login
+PARAMS: email
+
+QUERY 2: Login by Phone
+SQL: SELECT user_id, name, email, phone, pass 
+     FROM users 
+     WHERE phone = ? LIMIT 1
+USE: Find user by phone number for login
+PARAMS: phone
+
+QUERY 3: Login by Phone (Formatted)
+SQL: SELECT user_id, name, email, phone, pass 
+     FROM users 
+     WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? 
+     LIMIT 1
+USE: Flexible phone matching removing formatting characters
+PARAMS: formatted_phone
+
+QUERY 4: Auto-Login from Cookie
+SQL: SELECT user_id, name, email, phone 
+     FROM users 
+     WHERE user_id = ? LIMIT 1
+USE: Restore session from remember me cookie
+PARAMS: user_id (from cookie)
+
+
+-----------------------------------
+FILE: pages/register.php
+PURPOSE: New user registration
+-----------------------------------
+
+QUERY 1: Check Duplicate NID
+SQL: SELECT user_id FROM users WHERE nid = ? LIMIT 1
+USE: Verify NID not already registered (uniqueness check)
+PARAMS: nid
+
+QUERY 2: Get Next User ID
+SQL: SELECT MAX(user_id) as max_user_id FROM users
+USE: Generate next available user_id (max + 1)
+
+QUERY 3: Insert New User
+SQL: INSERT INTO users (user_id, name, email, phone, nid, pass) 
+     VALUES (?, ?, ?, ?, ?, ?)
+USE: Create new user account
+PARAMS: user_id, name, email, phone, nid, password
+
+
+===============================================================================
+END OF SQL QUERIES DOCUMENTATION
+===============================================================================

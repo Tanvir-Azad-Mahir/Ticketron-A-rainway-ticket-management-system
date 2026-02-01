@@ -1,0 +1,682 @@
+===============================================================================
+                    TICKETRON - PHP FILES DOCUMENTATION
+                Railway Ticket Management System
+===============================================================================
+
+TABLE OF CONTENTS:
+1. CONFIGURATION & DATABASE FILES
+2. USER-FACING PAGES (PAGES/)
+3. BACKEND PROCESSING FILES (PROCESS/)
+4. AUTHENTICATION & SESSION MANAGEMENT
+
+===============================================================================
+1. CONFIGURATION & DATABASE FILES
+===============================================================================
+
+FILE: config.php
+PURPOSE: Configuration settings for the application
+CONTAINS:
+  - Database connection parameters
+  - Application-wide constants
+  - Base URL and path configurations
+  - Environment settings (development/production)
+
+FILE: db.php
+PURPOSE: Database connection handler
+FUNCTIONALITY:
+  - Establishes MySQLi connection to database
+  - Creates $conn object used throughout the application
+  - Sets character encoding to UTF-8
+  - Handles connection errors
+USAGE: include '../db.php'; at the top of files needing database access
+
+
+===============================================================================
+2. USER-FACING PAGES (PAGES/ DIRECTORY)
+===============================================================================
+
+-----------------------------------
+AUTHENTICATION PAGES
+-----------------------------------
+
+FILE: pages/login.php
+PURPOSE: User login page with email/phone authentication
+FEATURES:
+  - Login form with email or phone number
+  - Password verification (plain text matching)
+  - "Remember Me" functionality with cookies
+  - Auto-login from remember me cookie
+  - Success/logout messages display
+  - Redirect to dashboard after successful login
+  - Link to registration page
+  - Link to admin login
+SESSION VARIABLES SET:
+  - $_SESSION['user_id']
+  - $_SESSION['name']
+  - $_SESSION['email']
+  - $_SESSION['phone']
+  - $_SESSION['logged_in'] = true
+  - $_SESSION['login_time']
+
+FILE: pages/register.php
+PURPOSE: New user registration form
+FEATURES:
+  - Registration form with validation
+  - Checks for duplicate NID
+  - Auto-generates next user_id
+  - Plain text password storage
+  - Redirects to login after successful registration
+FORM FIELDS:
+  - Name, Email, Phone, NID (National ID), Password, Confirm Password
+VALIDATION:
+  - Required fields check
+  - Email format validation
+  - Phone number format
+  - Password match confirmation
+  - Unique NID check
+
+FILE: pages/logout.php
+PURPOSE: Logs out user and destroys session
+FUNCTIONALITY:
+  - Clears all session variables
+  - Destroys session
+  - Deletes remember me cookie
+  - Redirects to login page with success message
+
+
+-----------------------------------
+ADMIN AUTHENTICATION
+-----------------------------------
+
+FILE: pages/admin_login.php
+PURPOSE: Admin-only login page
+FEATURES:
+  - Separate authentication for administrators
+  - Username/password login
+  - Light theme matching user interface
+  - Error message display
+  - Back to user login link
+SESSION VARIABLES SET:
+  - $_SESSION['admin_logged_in']
+  - $_SESSION['admin_id']
+  - $_SESSION['admin_username']
+  - $_SESSION['admin_name']
+
+FILE: pages/admin_logout.php
+PURPOSE: Admin logout handler
+FUNCTIONALITY:
+  - Clears admin session variables
+  - Regenerates session ID for security
+  - Redirects to admin login page
+
+FILE: process/process_admin_login.php
+PURPOSE: Backend processing for admin login
+FUNCTIONALITY:
+  - Validates admin credentials against admin table
+  - Sets admin session variables
+  - Redirects to admin dashboard or back to login with error
+
+
+-----------------------------------
+MAIN USER PAGES
+-----------------------------------
+
+FILE: pages/dashboard.php
+PURPOSE: Main user dashboard with train search
+FEATURES:
+  - User profile sidebar with navigation
+  - Train search form (from/to station, date)
+  - Displays search results with train details
+  - Shows available seats by coach type
+  - Checks train running days (weekday-based)
+  - Gets schedule information
+  - Links to book tickets
+  - Fare information by coach type
+  - Route and station information
+SEARCH LOGIC:
+  - Finds trains connecting two stations
+  - Filters by travel date (weekday)
+  - Shows only active trains running on selected day
+  - Displays seat availability per coach type
+  - Shows pricing per coach type
+NAVIGATION LINKS:
+  - Dashboard (home)
+  - My Bookings (filtered view)
+  - All Tickets (ticket.php)
+  - Profile
+  - Logout
+
+FILE: pages/profile.php
+PURPOSE: User profile view
+FEATURES:
+  - Displays user information
+  - Shows user_id, name, email, phone, NID
+  - Account creation date
+  - Link back to dashboard
+PROTECTED: Requires login session
+
+FILE: pages/my_bookings.php
+PURPOSE: Enhanced booking history with filters
+FEATURES:
+  - Filterable booking list (All, Upcoming, Completed, Cancelled)
+  - Card-based layout for each booking
+  - Shows booking details, train info, route, travel date
+  - Seat numbers display
+  - Status badges with proper labels
+  - Quick actions: Print, View Details, Cancel
+  - Proper cancellation status messages:
+    * "Cancellation Pending" - waiting for admin
+    * "Cancellation Approved" - admin approved
+FILTERS:
+  - all: Shows all bookings
+  - upcoming: Completed bookings with future travel dates
+  - completed: Bookings with past travel dates
+  - cancelled: All cancelled/cancel requested bookings
+
+FILE: pages/ticket.php
+PURPOSE: Original detailed ticket list view
+FEATURES:
+  - Shows all user bookings with full details
+  - Expandable ticket details (click to show/hide)
+  - Detailed ticket information per seat
+  - Coach, seat number, fare breakdown
+  - Schedule ID and passenger info
+  - Request cancellation button
+  - Cancellation status display
+  - Link to confirmation page
+
+
+-----------------------------------
+BOOKING WORKFLOW PAGES
+-----------------------------------
+
+FILE: pages/book_ticket.php
+PURPOSE: Coach selection page (Step 1 of booking)
+FLOW: Dashboard Search → book_ticket.php → seat_selection.php → booking
+FEATURES:
+  - Displays available coaches for selected train
+  - Shows coach type, capacity, available seats
+  - Seat availability check per coach
+  - Price display per coach
+  - Route and travel info display
+  - Prevents booking if coach fully booked
+  - Auto-selects first available coach (optional)
+RECEIVES FROM DASHBOARD:
+  - train_id, schedule_id, travel_date
+  - from_station, to_station
+PASSES TO SEAT SELECTION:
+  - All above + coach_id, coach_type
+
+FILE: pages/seat_selection.php
+PURPOSE: Seat selection page (Step 2 of booking)
+FEATURES:
+  - Visual seat map (2x2 grid layout per row with aisle)
+  - Shows all seats for selected coach
+  - Color-coded seats:
+    * Red - Already booked (unavailable)
+    * Blue stripe - Window seats
+    * Green - Available seats
+    * Yellow border - Your selected seats
+  - Legend explaining seat colors
+  - Maximum 4 seats per booking
+  - Real-time total calculation
+  - Selected seats summary
+  - Remove seat option from summary
+  - Confirmation before proceeding
+  - Row labels (A, B, C, etc.)
+SEAT LAYOUT:
+  - 2 seats | aisle | 2 seats per row
+  - Window seats marked with blue stripe (positions 1 and 4)
+RECEIVES FROM BOOK_TICKET:
+  - train_id, schedule_id, coach_id, coach_type
+  - travel_date, from_station, to_station
+PASSES TO PROCESS_BOOKING:
+  - All above + selected_seats (comma-separated IDs)
+  - total_amount, price_per_seat
+
+FILE: pages/confirmation.php
+PURPOSE: Booking confirmation and ticket display
+FEATURES:
+  - Shows complete booking summary
+  - Displays all ticket details
+  - Passenger information
+  - Train and route details
+  - Payment information
+  - Booking status
+  - Link back to bookings
+
+FILE: pages/print_ticket.php
+PURPOSE: Printable ticket format
+FEATURES:
+  - Professional ticket layout
+  - Shows booking ID, barcode reference
+  - Passenger and journey details
+  - Route display with origin/destination
+  - Individual ticket cards for each seat
+  - Coach and seat information
+  - Total amount and payment status
+  - Print button with auto-print option
+  - Print-optimized CSS (hides UI elements when printing)
+USAGE: Accessed from my_bookings.php "Print" button
+PROTECTED: Verifies booking belongs to logged-in user
+
+
+-----------------------------------
+INFORMATION & DETAILS PAGES
+-----------------------------------
+
+FILE: pages/train_details.php
+PURPOSE: Detailed train information page
+FEATURES:
+  - Complete train information
+  - Route details with all stations
+  - Station-by-station distance information
+  - Running days (weekday schedule)
+  - Coach types and availability
+  - Seat availability per coach
+  - Pricing information
+  - Schedule details
+  - Book now button to seat selection
+DISPLAYS:
+  - Train name, type, status
+  - Route with start/end stations
+  - All intermediate stations in order
+  - Distance from start for each station
+  - Days train operates
+  - Total route distance
+  - Available coaches with seat counts
+
+FILE: pages/train.php
+PURPOSE: Train listing/search page (if used)
+FUNCTIONALITY:
+  - Lists available trains
+  - May show all trains or filtered results
+  - Links to train details
+
+FILE: pages/tt.php
+PURPOSE: (Appears to be a test or template file)
+NOTE: May be unused or for development testing
+
+
+-----------------------------------
+ADMIN PAGES
+-----------------------------------
+
+FILE: pages/admin_dashboard.php
+PURPOSE: Admin control panel homepage
+FEATURES:
+  - Statistics dashboard (users, bookings, trains, payments counts)
+  - Quick stats cards
+  - Navigation to management pages
+  - Logout button
+  - Light theme matching user interface
+DISPLAYS:
+  - Total users count
+  - Total bookings count
+  - Total trains count
+  - Total payments count
+PROTECTED: Requires admin_logged_in session
+
+FILE: pages/admin_manage.php
+PURPOSE: Admin data management interface
+FEATURES:
+  - Add new stations (ID, code, name, city, division)
+  - Add new routes (ID, name, start/end stations, distance)
+  - Add new trains (ID, name, type, status, route)
+  - Add new schedules (ID, train, route, date, time)
+  - View refund requests
+  - Approve/decline refund requests
+  - Success/error message display
+REFUND MANAGEMENT:
+  - Approve: Sets payment to 'Refunded', booking to 'Cancelled'
+  - Decline: Restores payment to 'Paid', booking to 'Completed'
+PROTECTED: Requires admin session
+
+
+===============================================================================
+3. BACKEND PROCESSING FILES (PROCESS/ DIRECTORY)
+===============================================================================
+
+FILE: process/process_login.php
+PURPOSE: Handles user login form submission
+FUNCTIONALITY:
+  - Receives email/phone and password via POST
+  - Queries database for user
+  - Verifies password (plain text match)
+  - Sets session variables on success
+  - Handles "Remember Me" cookie
+  - Redirects to dashboard or back to login with error
+
+FILE: process/process_admin_login.php
+PURPOSE: Processes admin login attempts
+FUNCTIONALITY:
+  - Validates admin credentials
+  - Checks against admin table
+  - Sets admin session variables
+  - Redirects to admin dashboard or login with error
+
+FILE: process/process_booking.php
+PURPOSE: Core booking processing logic (creates tickets)
+FLOW: Receives data from seat_selection.php → Creates booking
+FUNCTIONALITY:
+  - Validates all required fields
+  - Checks selected seats aren't empty
+  - Begins database transaction
+  - Creates booking record (status: 'Pending')
+  - Gets generated booking_id
+  - For each selected seat:
+    * Checks if already booked (prevents double booking)
+    * Inserts ticket record
+    * Inserts booking_detail record
+  - Inserts payment record (status: 'Paid')
+  - Updates booking status to 'Completed'
+  - Commits transaction
+  - Redirects to confirmation page with booking_id
+ERROR HANDLING:
+  - Rolls back transaction on any error
+  - Returns to seat selection with error message
+  - Prevents duplicate seat bookings
+RECEIVES:
+  - schedule_id, train_id, coach_id, selected_seats
+  - total_amount, price_per_seat, travel_date
+  - from_station, to_station
+
+FILE: process/process_cancel_request.php
+PURPOSE: Handles user cancellation requests
+FUNCTIONALITY:
+  - Receives booking_id from form submission
+  - Updates booking status to 'CancelRequested'
+  - Updates payment status to 'Refund Pending'
+  - Redirects back to tickets page
+  - Admin must approve/decline from admin panel
+NOTE: Does not immediately cancel - requires admin approval
+
+FILE: process/process_payment.php
+PURPOSE: Payment processing handler (if implemented)
+FUNCTIONALITY:
+  - Would handle payment gateway integration
+  - Currently using direct payment record creation
+  - May be placeholder for future payment gateway
+
+
+===============================================================================
+4. AUTHENTICATION & SESSION MANAGEMENT
+===============================================================================
+
+-----------------------------------
+SESSION VARIABLES USED
+-----------------------------------
+
+USER SESSION:
+  $_SESSION['logged_in'] = true/false
+  $_SESSION['user_id'] = User ID from database
+  $_SESSION['name'] = User's full name
+  $_SESSION['email'] = User's email
+  $_SESSION['phone'] = User's phone number
+  $_SESSION['login_time'] = Timestamp of login
+
+ADMIN SESSION:
+  $_SESSION['admin_logged_in'] = true/false
+  $_SESSION['admin_id'] = Admin ID
+  $_SESSION['admin_username'] = Admin username
+  $_SESSION['admin_name'] = Admin display name
+  $_SESSION['admin_email'] = Admin email (if applicable)
+
+TEMPORARY SESSION (for messages):
+  $_SESSION['error'] = Error message to display
+  $_SESSION['success'] = Success message to display
+  $_SESSION['admin_error'] = Admin-specific error
+
+
+-----------------------------------
+ACCESS CONTROL PATTERNS
+-----------------------------------
+
+USER PAGE PROTECTION:
+  session_start();
+  if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+      header("Location: login.php");
+      exit();
+  }
+
+ADMIN PAGE PROTECTION:
+  session_start();
+  if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+      header('Location: admin_login.php');
+      exit();
+  }
+
+BOOKING OWNERSHIP VERIFICATION:
+  - Checks booking belongs to logged-in user
+  - Prevents users from accessing other users' bookings
+  - Used in confirmation.php, print_ticket.php
+
+
+-----------------------------------
+COOKIE USAGE
+-----------------------------------
+
+REMEMBER ME FEATURE:
+  Cookie Name: remember_login
+  Content: base64_encode(user_id . ':' . hash('sha256', email))
+  Duration: 30 days
+  Verification: Decodes cookie, fetches user, verifies hash
+  Auto-login: Sets session if cookie valid
+
+
+===============================================================================
+5. FILE DEPENDENCIES & FLOW
+===============================================================================
+
+-----------------------------------
+TYPICAL USER BOOKING FLOW
+-----------------------------------
+
+1. login.php
+   ↓ (successful login)
+2. dashboard.php
+   ↓ (search trains, select train)
+3. book_ticket.php (train_id, schedule_id, stations, date)
+   ↓ (select coach)
+4. seat_selection.php (+ coach_id, coach_type)
+   ↓ (select seats)
+5. process/process_booking.php
+   ↓ (create booking, tickets, payment)
+6. confirmation.php (booking_id)
+   ↓
+7. my_bookings.php / ticket.php (view all bookings)
+   ↓
+8. print_ticket.php (printable version)
+
+-----------------------------------
+CANCELLATION FLOW
+-----------------------------------
+
+1. ticket.php or my_bookings.php
+   ↓ (click Request Cancellation)
+2. process/process_cancel_request.php
+   ↓ (sets status to CancelRequested)
+3. Admin sees in admin_manage.php
+   ↓ (admin approves or declines)
+4. Status updated to Cancelled or back to Completed
+   ↓
+5. User sees "Cancellation Approved" or "Cancellation Declined"
+
+-----------------------------------
+ADMIN MANAGEMENT FLOW
+-----------------------------------
+
+1. admin_login.php
+   ↓ (admin credentials)
+2. process/process_admin_login.php
+   ↓ (verify admin)
+3. admin_dashboard.php (statistics)
+   ↓ (navigate to management)
+4. admin_manage.php
+   ↓ (add stations/routes/trains/schedules)
+   ↓ (approve/decline refunds)
+5. admin_logout.php
+
+
+===============================================================================
+6. KEY PHP FEATURES USED
+===============================================================================
+
+DATABASE INTERACTION:
+  - MySQLi with prepared statements
+  - Parameterized queries (prevents SQL injection)
+  - bind_param() for parameter binding
+  - Transactions for multi-table operations
+  - Error handling with try-catch
+
+SESSION MANAGEMENT:
+  - session_start() on every page
+  - $_SESSION superglobal for data storage
+  - session_regenerate_id() for security
+  - session_destroy() on logout
+
+SECURITY MEASURES:
+  - Prepared statements for all queries
+  - htmlspecialchars() for output escaping
+  - Session-based authentication
+  - Access control checks on every protected page
+  - CSRF protection via POST forms (not tokens currently)
+  - Password hashing (NOTE: Currently plain text - should use password_hash())
+
+DATA VALIDATION:
+  - Required field checks
+  - Email format validation
+  - Phone number validation
+  - Duplicate prevention (NID, seat bookings)
+  - Date validation (future dates only)
+  - Seat count limits (max 4 per booking)
+
+ERROR HANDLING:
+  - Database transaction rollbacks
+  - User-friendly error messages
+  - Session-based error/success messages
+  - Logging (basic via error display)
+
+
+===============================================================================
+7. COMMON CODE PATTERNS
+===============================================================================
+
+DATABASE CONNECTION:
+  include '../db.php';  // Establishes $conn
+
+SESSION CHECK:
+  session_start();
+  if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+      header("Location: login.php");
+      exit();
+  }
+
+PREPARED STATEMENT PATTERN:
+  $stmt = $conn->prepare("SELECT * FROM table WHERE column = ?");
+  $stmt->bind_param("s", $variable);
+  $stmt->execute();
+  $result = $stmt->get_result();
+  $row = $result->fetch_assoc();
+  $stmt->close();
+
+TRANSACTION PATTERN:
+  $conn->begin_transaction();
+  try {
+      // Multiple queries
+      $conn->commit();
+      // Success
+  } catch (Exception $e) {
+      $conn->rollback();
+      // Handle error
+  }
+
+ERROR MESSAGE PATTERN:
+  $_SESSION['error'] = "Error message";
+  header("Location: page.php");
+  exit();
+
+
+===============================================================================
+8. FILE NAVIGATION STRUCTURE
+===============================================================================
+
+ROOT DIRECTORY:
+  /
+  ├── config.php
+  ├── db.php
+  ├── index.php (landing page)
+  └── test.php (testing file)
+
+PAGES DIRECTORY:
+  /pages/
+  ├── login.php
+  ├── register.php
+  ├── logout.php
+  ├── dashboard.php
+  ├── profile.php
+  ├── my_bookings.php (new - filtered view)
+  ├── ticket.php (detailed view)
+  ├── book_ticket.php
+  ├── seat_selection.php
+  ├── confirmation.php
+  ├── print_ticket.php (new - printable)
+  ├── train_details.php
+  ├── train.php
+  ├── tt.php
+  ├── admin_login.php
+  ├── admin_logout.php
+  ├── admin_dashboard.php
+  └── admin_manage.php
+
+PROCESS DIRECTORY:
+  /process/
+  ├── process_login.php
+  ├── process_admin_login.php
+  ├── process_booking.php
+  ├── process_cancel_request.php
+  └── process_payment.php
+
+ASSETS DIRECTORIES:
+  /css/ - Stylesheets
+  /js/ - JavaScript files
+  /image/ - Images and icons
+
+
+===============================================================================
+9. IMPORTANT NOTES
+===============================================================================
+
+SECURITY CONSIDERATIONS:
+  1. Currently uses plain text passwords - SHOULD IMPLEMENT password_hash()
+  2. No CSRF tokens - should add for form security
+  3. Input validation exists but could be strengthened
+  4. File upload security not applicable (no uploads yet)
+  5. Session fixation prevention with regenerate_id
+
+DATABASE TRANSACTIONS:
+  - Used in process_booking.php for atomic operations
+  - Ensures data consistency across booking, tickets, and payment
+  - Rollback on any error prevents partial bookings
+
+DATE HANDLING:
+  - All dates stored as YYYY-MM-DD format
+  - Travel dates must be future dates
+  - Weekday-based train schedules (not specific dates)
+  - date() and strtotime() used for date manipulation
+
+ERROR REPORTING:
+  - Development: Display errors
+  - Production: Should log errors, not display
+  - User-friendly messages in sessions
+  - Database errors caught and handled
+
+FILE ORGANIZATION:
+  - Clear separation: pages/ for UI, process/ for backend
+  - Consistent naming: process_*.php for form handlers
+  - Reusable db.php for all database connections
+
+
+===============================================================================
+END OF PHP FILES DOCUMENTATION
+===============================================================================
