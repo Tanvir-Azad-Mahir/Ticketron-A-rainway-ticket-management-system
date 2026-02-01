@@ -103,7 +103,7 @@ Ticketron/
 ## ⚙️ Installation & Setup
 
 1. Clone the repository
-git clone https://github.com/your-username/ticketron.git
+git clone https://github.com/tanvir-azad-mahir/ticketron.git
 
 
 Move the project to XAMPP htdocs
